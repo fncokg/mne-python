@@ -10,7 +10,7 @@ from xml.etree.ElementTree import parse
 import numpy as np
 
 from ...utils import logger
-
+from ...annotations import Annotations
 
 def _read_events(input_fname, info):
     """Read events for the record.
@@ -240,3 +240,54 @@ def parse_ECI_events_from_xml(fname):
         for event in root.findall("ns:event", ns)
     ]
     return events
+
+
+
+def parse_annotations_from_ECI_events(events):
+    """
+    Parse events read from `parse_ECI_events_from_xml()` to an Annotations object. The event codes and cell labels are parsed in `description`.
+
+    Parameters
+    ----------
+    events : list[dict]
+        events read from `parse_ECI_events_from_xml()`
+
+    Returns
+    -------
+    Annotations
+        The `description`s is in format "EventCode:CellLabel". For example "stim+:foo" where "foo" is a user-defined cell label in EPrime.
+    
+    Note: DONOT use this Annotations to create a events object directly without any filter. You are recommended to use the `regex` keyword of the `events_from_annotations()` function to filter out a single kind of event code such as `regex="stm\+:"`, otherwise, you will get overlapping.
+    """
+
+    # The relationship between the cell labels and corresponding numbers are saved in first serveral events. Then a "bgin" event code marks the start time of the exp. After that here goes the true events information.
+    begin = False
+    cell_num2labs = {}
+
+    # kwargs to be passed to Annotations
+    annots = {"onset": [], "duration": [], "description": []}
+    for event in events:
+        # Read cell labels first
+        if event["code"] == "CELL":
+            assert "keys" in event and "cel#" in event["keys"]
+            cell_num2labs.update({event["keys"]["cel#"]: event["label"]})
+        # Parse true event data
+        if begin:
+            code = event["code"]
+            # Get the relative time in seconds
+            onset = (event["beginTime"] - start_time).total_seconds()
+            # Raw duration data is in ms, convert to seconds
+            duration = event["duration"] / 1000
+
+            # Read cell number from the "cel#" key and convert it to labels.
+            if "keys" in event and "cel#" in event["keys"]:
+                label = cell_num2labs[event["keys"]["cel#"]]
+                desc = f"{code}:{label}"
+                annots["description"].append(desc)
+                annots["duration"].append(duration)
+                annots["onset"].append(onset)
+        # Save the start time
+        elif event["code"] == "bgin":
+            start_time = event["beginTime"]
+            begin = True
+    return Annotations(**annots)
