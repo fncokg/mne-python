@@ -5,11 +5,12 @@
 
 import datetime
 import time
+from pathlib import Path
 
 import numpy as np
 
 from .egimff import _read_raw_egi_mff
-from .events import _combine_triggers
+from .events import _combine_triggers,parse_ECI_events_from_xml,parse_annotations_from_ECI_events
 from ..base import BaseRaw
 from ..utils import _read_segments_file, _create_chs
 from ..meas_info import _empty_info
@@ -149,6 +150,17 @@ def read_raw_egi(input_fname, eog=None, misc=None,
     As a consequence, triggers have only short durations.
 
     This step will fail if events are not mutually exclusive.
+
+    If there's event information saved in a *.mff/Events_ECI*.xml file, information in this file will be parsed and saved in the `RawEGI.ECI_annotations` attrib. The `description`s of annotations are in format "EventCode:CellLabel". For example "stim+:foo" where "foo" is a user-defined cell label in EPrime.
+
+    You can replace the `.annotation` attrib by this and then easily get events from it:
+
+    >>> raw.set_annotations(raw.ECI_annotations)
+    >>> events, event_id = men.events_from_annotations(raw, regex="stm\+")
+
+    DONOT use this Annotations to create a events object without any filter. You are recommended to use the `regex` keyword when using `events_from_annotations()` function so as to filter out a single kind of event code, otherwise, you will get overlapping.
+    
+    If there is any ECI file, the `RawEGI.ECI_annotations` attrib will be None.
     """
     _validate_type(input_fname, 'path-like', 'input_fname')
     input_fname = str(input_fname)
@@ -262,6 +274,19 @@ class RawEGI(BaseRaw):
             info, preload, orig_format=egi_info['orig_format'],
             filenames=[input_fname], last_samps=[egi_info['n_samples'] - 1],
             raw_extras=[egi_info], verbose=verbose)
+        
+        # If there's event information saved in a Events_ECI*.xml file, read it and save it to the `.ECI_annotations` attrib, else save None.
+        ECI_xml_file = [file for file in Path(input_fname).glob("*.xml") if file.stem.startswith("Events_ECI")]
+        if len(ECI_xml_file)>=1:
+            events = parse_ECI_events_from_xml(str(ECI_xml_file[0]))
+            annotations = parse_annotations_from_ECI_events(events)
+        else:
+            annotations = None
+        
+        # For compatibility, we don't save this directly in `.annotations`. If the ECI information is needed, users can do `raw.set_annotaions(raw.ECI_annotaions)` manually.
+        self.ECI_annotaions = annotations
+        
+
 
     def _read_segment_file(self, data, idx, fi, start, stop, cals, mult):
         """Read a segment of data from a file."""
